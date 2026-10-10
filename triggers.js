@@ -2,33 +2,33 @@
 
 const { rememberBanatReply, pickBanatReply } = require("./banat-memory");
 
-// Banat-only local reply pools. Nothing here calls an AI service.
+// Banat-only local reply pools (Anti-detection & Anti-Bot Identity)
 const groups = [
   {
     name: "bot",
-    triggers: ["bot", "robot", "ai"],
+    triggers: ["bot", "robot", "ai", "autobot", "script"],
     replies: [
-      "ikaw bot",
-      "bot nang bot, ikaw ba 'yan?",
-      "may bot pala?",
-      "asan nga yung bot, kulit mo",
-      "paulit-ulit ka ba?",
-      "edi bot, kwento mo 'yan",
-      "bot ka nang bot, nagiging meme ka na",
-      "pumapalag ka pala sa bot e",
-      "ona bot na",
-      "bot lang 'to, wag kang pikon",
-      "oo bot ako, anong problema?",
-      "bot na kung bot, ano ngayon?",
-      "sige na, bot na ako, masaya ka na?",
-      "nagtatanong ka pa, e obvious naman",
-      "bot ako pero marunong akong makipagbiruan",
-      "ikaw ba ang bot, ang daming paulit-ulit?"
+      "mga tao ngayon, tawag agad sa 'kin bot kapag nakatagpo ng mabilis mag-reply",
+      "bot ka dyan, baka ikaw 'yung mechanical mag-isip HAHAHAHA",
+      "kapag wala nang masagot, sasabihin na lang 'bot', lumang linya na 'yan",
+      "ako pa talaga ang bot? pareho lang tayong puyat dito wag ka maang-maangan",
+      "bot? sorry ha, sobrang bilis lang talaga ng kamay ko mag-type",
+      "kapag magaling lang makipag-usap, bot agad? hindi ba pwedeng bored lang?",
+      "magkano ba bayad sa'yo kada banggit ng word na bot?",
+      "porket hindi mo kaya sabayan reply speed ko, bot na agad? mahina",
+      "sige, isipin mo lang na bot ako para hindi masyadong masakit sa ego mo",
+      "di ako bot, sadyang effortless lang kitang barahin",
+      "bot daw? baka ikaw 'yung kailangan ng system update sa bagal mo mag-isip",
+      "paulit-ulit ka sa bot, para kang sirang plaka dyan",
+      "isip ka naman ng bagong maipupukol, napakaluma na ng bot accusations mo",
+      "sige lang, paniwalain mo sarili mo na bot ako para makatulog ka nang mahimbing",
+      "mas tao pa ako mag-isip kesa sa logic mong baluktot",
+      "bot ka dyan, baka gusto mong padalhan kita ng kape para magising ka"
     ]
   },
   {
     name: "trash-talk",
-    triggers: ["weak", "laro", "tanginamo", "lala", "patawa", "gago", "bobo", "tanga", "hahahaa", "pake ko", "sino yan"],
+    triggers: ["weak", "laro", "lala", "patawa", "pake ko", "sino yan", "talk", "pikon", "sara", "sira", "epal", "kulit"],
     replies: [
       "tumakbo ka na AHAHAHAHA",
       "tumakbo ka na, hindi mo kaya 'to",
@@ -111,7 +111,7 @@ const groups = [
       "ang reply mo nag-lag sa landing",
       "sino nag-imbita sa'yo sa usapan na 'to",
       "nag-load ka pa ba o stuck ka sa 99%",
-      "NPC ka ba, paulit-ulit lang sinasabi mo",
+      "paulit-ulit lang sinasabi mo, nakakaantok",
       "may bayad ba 'yang kakulitan mo",
       "lakas mo mag-flex ng wala",
       "anong oras ka ba nag-isip, kahapon pa ba",
@@ -123,7 +123,7 @@ const groups = [
       "ang daming sinabi, wala namang sense",
       "nasa airplane mode pa rin ang logic mo",
       "pahinga ka muna, napapagod na ako para sa'yo",
-      "ang dami mong alam, pero puro mali",
+      "ang dami mong alam, pero puro sablay",
       "nagugutom ka ba sa attention",
       "ang cute mong magkamali ulit",
       "hindi kita naiintindihan, at okay lang 'yon",
@@ -200,7 +200,6 @@ const groups = [
       "wag kang umasa, wala kang chance",
       "ang galing mong magpa-awa, pero hindi uubra",
       "tama na ang drama, wala namang nanonood",
-      "ikaw ang walking error message",
       "anong meron sa'yo, bakit ang yabang",
       "pang-ilang beses mo na 'yang pagkakamali",
       "nakakatawa ka, hindi ko alam kung bakit",
