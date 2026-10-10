@@ -1,31 +1,33 @@
 "use strict";
 
 /*
- * BANAT-ONLY MESSENGER BOT (WITH AUTO-DEBUGGING & ANTI-DETECTION)
+ * BANAT-ONLY MESSENGER BOT (HUMANIZED & ANTI-DETECTION INTEGRATED)
  * -----------------------------------------------------------------------------
- * No AI. No games. No economy. No RPG. No music. No database.
- *
- * ACTIVATION:
- *   - Turn ON "Auto reply" in the CELESTIAL dashboard for that specific GC, OR
- *   - Send "!banat on" or "." inside the thread.
- *
- * OTHER COMMANDS:
- *   !banat off
- *   !banat toggle
- *   !banat status
- *   !banat help
+ * Framework: Celestial
+ * Modules Integrated: 
+ *   - banat-human.js
+ *   - human-delay.js
+ *   - human-mimic.js
+ *   - human-typing.js
+ *   - triggers.js
  */
 
 const fs = require("fs");
 const path = require("path");
 const { login } = require("ws3-fca");
 const { getTriggerReply, getBanatConversationReply } = require("./triggers");
+
+// --- HUMANIZATION MODULE INTEGRATION ---
 const { sendBanatReplyWithTyping } = require("./banat-human");
+const humanDelay = require("./human-delay");
+const humanMimic = require("./human-mimic");
+const humanTyping = require("./human-typing");
+
 const { classifyBanatTarget, setBanatConversationMode, isBanatConversationModeActive } = require("./banat-targeting");
 const store = require("./store");
 const autoreply = require("./autoreply");
 
-// Railway Volume handling
+// Railway Persistent Volume Handling
 if (!process.env.CELESTIAL_SESSION_FILE && process.env.RAILWAY_VOLUME_MOUNT_PATH) {
   process.env.CELESTIAL_SESSION_FILE = path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, "appstate.json");
 }
@@ -41,7 +43,7 @@ const threadQueues = new Map();
 const threadLastSent = new Map();
 const threadCooldown = new Map();
 
-// --- Counting Tracker ---
+// Counting Tracker
 const threadCountingState = new Map();
 
 let globalActive = 0;
@@ -67,7 +69,7 @@ function pushEvent(type, message) {
   if (events.length > 100) events.length = 100;
 }
 
-// --- AUTO-DEBUGGING ERROR LOGGER ---
+// Auto-Debug & Safe Error Logger
 function noteError(where, error) {
   stats.errors++;
   let errMsg = "";
@@ -103,12 +105,9 @@ let lastProbeAt = null;
 let lastProbeOk = null;
 let offlineSince = Date.now();
 
-process.on("uncaughtException", (error) => {
-  noteError("uncaughtException", error);
-});
-process.on("unhandledRejection", (error) => {
-  noteError("unhandledRejection", error);
-});
+process.on("uncaughtException", (error) => noteError("uncaughtException", error));
+process.on("unhandledRejection", (error) => noteError("unhandledRejection", error));
+
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
     console.log(`[BANAT] ${sig} received, shutting down`);
@@ -335,15 +334,24 @@ function handleBanatCommand(api, event, body) {
   return true;
 }
 
+// --- FULL HUMANIZED SEND FUNCTION ---
 async function sendBanat(api, event, text) {
   try {
-    const result = await sendBanatReplyWithTyping(api, text, String(event.threadID), event.messageID || null, {
+    // Process text through human mimicry if module supports formatting
+    let formattedText = text;
+    if (humanMimic && typeof humanMimic.process === "function") {
+      formattedText = humanMimic.process(text);
+    }
+
+    const result = await sendBanatReplyWithTyping(api, formattedText, String(event.threadID), event.messageID || null, {
       trafficSendMessage,
-      incomingText: event.body || ""
+      incomingText: event.body || "",
+      humanTypingModule: humanTyping
     });
+    
     stats.sent++;
-    pushEvent("reply", `thread ${event.threadID}: ${String(text).slice(0, 60)}`);
-    debugLog("Reply", `Sent to ${event.threadID}: ${text}`);
+    pushEvent("reply", `thread ${event.threadID}: ${String(formattedText).slice(0, 60)}`);
+    debugLog("Reply", `Sent humanized message to ${event.threadID}: ${formattedText}`);
     return result;
   } catch (error) {
     noteError("reply", error);
@@ -420,7 +428,6 @@ function onMessage(api, event) {
   pushEvent("message", `thread ${event.threadID} · ${event.senderID || "?"}: ${body.slice(0, 60)}`);
 
   const threadID = String(event.threadID);
-  const senderID = String(event.senderID || "");
 
   if (body === "." || body === "..") { 
     stats.commands++; 
@@ -434,7 +441,7 @@ function onMessage(api, event) {
     return; 
   }
 
-  // --- DASHBOARD CHECK ---
+  // --- DASHBOARD / THREAD CHECK ---
   const active = autoreply.isOn() || activeThreads.has(threadID) || isBanatConversationModeActive(threadID);
   const target = classifyBanatTarget({ event, body, botID: botUserID });
   
@@ -471,7 +478,12 @@ function onMessage(api, event) {
         ];
         const randomBreaker = breakerReplies[Math.floor(Math.random() * breakerReplies.length)];
         
-        const countDelay = Math.floor(Math.random() * 3000) + 1000;
+        // Calculate delay via human-delay module if available
+        let countDelay = Math.floor(Math.random() * 3000) + 1000;
+        if (humanDelay && typeof humanDelay.getDelay === "function") {
+          countDelay = humanDelay.getDelay(randomBreaker.length);
+        }
+
         setTimeout(() => {
           sendBanat(api, event, randomBreaker).catch(err => noteError("counter breaker", err));
         }, countDelay);
@@ -480,15 +492,22 @@ function onMessage(api, event) {
     }
   }
 
-  // --- 2. NORMAL BANAT REPLY (1-15 Seconds Random Delay) ---
+  // --- 2. NORMAL BANAT REPLY WITH HUMANIZED DELAYS ---
   const reply = autoreply.pickReply(body, threadID, getTriggerReply, getBanatConversationReply);
   if (!reply) {
     debugLog("PickReply", `No reply pattern matched for message: "${body}"`);
     return;
   }
 
-  const randomReplyDelay = Math.floor(Math.random() * 14000) + 1000;
-  debugLog("BanatReply", `Queued reply in ${Math.round(randomReplyDelay / 1000)}s for thread ${threadID}`);
+  // Generate dynamic organic delay using human-delay module
+  let randomReplyDelay = Math.floor(Math.random() * 14000) + 1000;
+  if (humanDelay && typeof humanDelay.calculate === "function") {
+    randomReplyDelay = humanDelay.calculate(reply);
+  } else if (humanDelay && typeof humanDelay.getDelay === "function") {
+    randomReplyDelay = humanDelay.getDelay(reply.length);
+  }
+
+  debugLog("BanatReply", `Queued reply with ${Math.round(randomReplyDelay / 1000)}s delay for thread ${threadID}`);
 
   setTimeout(() => {
     sendBanat(api, event, reply).catch(error => noteError("banat reply delay", error));
@@ -810,7 +829,7 @@ try {
     probe_failures: probeFailures,
     last_probe_ok: lastProbeOk,
     last_probe_at: lastProbeAt,
-    memory_mb: Math.round(process.env.MEMORY_LIMIT_MB || process.memoryUsage().rss / 1048576),
+    memory_mb: Math.round(process.memoryUsage().rss / 1048576),
     memory_limit_mb: MEMORY_LIMIT_MB,
     admin_count: store.list().length,
     admin_only: Boolean(store.getSettings().admin_only),
