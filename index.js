@@ -1,7 +1,7 @@
 "use strict";
 
 /*
- * BANAT-ONLY MESSENGER BOT (ANTI-DETECTION + COUNTING BREAKER + DASHBOARD CONTROL)
+ * BANAT-ONLY MESSENGER BOT (WITH AUTO-DEBUGGING & ANTI-DETECTION)
  * -----------------------------------------------------------------------------
  * No AI. No games. No economy. No RPG. No music. No database.
  *
@@ -14,11 +14,6 @@
  *   !banat toggle
  *   !banat status
  *   !banat help
- *
- * Features:
- * - Dashboard thread restriction (gagana lang kung nakabukas sa dashboard)
- * - Random 1-15s reply delay (no skips)
- * - Counting breaker (sisirain ang bilangan hanggang 1000)
  */
 
 const fs = require("fs");
@@ -30,7 +25,7 @@ const { classifyBanatTarget, setBanatConversationMode, isBanatConversationModeAc
 const store = require("./store");
 const autoreply = require("./autoreply");
 
-// Railway: if a Volume is attached, keep the cookie there so it survives redeploys.
+// Railway Volume handling
 if (!process.env.CELESTIAL_SESSION_FILE && process.env.RAILWAY_VOLUME_MOUNT_PATH) {
   process.env.CELESTIAL_SESSION_FILE = path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, "appstate.json");
 }
@@ -72,10 +67,25 @@ function pushEvent(type, message) {
   if (events.length > 100) events.length = 100;
 }
 
+// --- AUTO-DEBUGGING ERROR LOGGER ---
 function noteError(where, error) {
   stats.errors++;
-  lastError = { where, message: String(error?.message || error).slice(0, 300), at: new Date().toISOString() };
+  let errMsg = "";
+  if (typeof error === "string") {
+    errMsg = error;
+  } else if (error && typeof error === "object") {
+    errMsg = error.message || error.error || JSON.stringify(error);
+  } else {
+    errMsg = String(error);
+  }
+
+  console.error(`[AUTO-DEBUG] Error at [${where}]:`, error);
+  lastError = { where, message: errMsg.slice(0, 300), at: new Date().toISOString() };
   pushEvent("error", `${where}: ${lastError.message}`);
+}
+
+function debugLog(section, message) {
+  console.log(`[DEBUG - ${section}] ${message}`);
 }
 
 const MAX_RECONNECTS = Math.max(1, Number(process.env.BANAT_MAX_RECONNECTS || 10));
@@ -94,12 +104,10 @@ let lastProbeOk = null;
 let offlineSince = Date.now();
 
 process.on("uncaughtException", (error) => {
-  console.error("[BANAT] uncaughtException:", error);
-  noteError("uncaught", error);
+  noteError("uncaughtException", error);
 });
 process.on("unhandledRejection", (error) => {
-  console.error("[BANAT] unhandledRejection:", error);
-  noteError("unhandled", error);
+  noteError("unhandledRejection", error);
 });
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => {
@@ -273,10 +281,11 @@ function commandSendMessage(api, message, threadID, replyToMessageID = null) {
 
 function sendCommandReply(api, event, message) {
   const threadID = String(event.threadID);
+  const textToSend = typeof message === "object" ? JSON.stringify(message) : String(message);
   setTimeout(() => {
-    commandSendMessage(api, message, threadID, event.messageID || null)
-      .then(() => { stats.sent++; console.log(`[BANAT] command reply sent: ${message}`); })
-      .catch(error => { noteError("command reply", error); console.error("[BANAT] command reply failed:", error?.message || error); });
+    commandSendMessage(api, textToSend, threadID, event.messageID || null)
+      .then(() => { stats.sent++; debugLog("Command", `Reply sent: ${textToSend}`); })
+      .catch(error => { noteError("command reply", error); });
   }, getRandomJitter(300, 700));
 }
 
@@ -284,6 +293,8 @@ function handleBanatCommand(api, event, body) {
   const threadID = String(event.threadID);
   const parts = String(body).trim().split(/\s+/);
   const sub = (parts[1] || "status").toLowerCase();
+
+  debugLog("Command", `Executed !banat ${sub} in thread ${threadID}`);
 
   if (sub === "on" || sub === "enable" || sub === "start") {
     setBanatConversationMode(threadID, true, event.senderID);
@@ -332,6 +343,7 @@ async function sendBanat(api, event, text) {
     });
     stats.sent++;
     pushEvent("reply", `thread ${event.threadID}: ${String(text).slice(0, 60)}`);
+    debugLog("Reply", `Sent to ${event.threadID}: ${text}`);
     return result;
   } catch (error) {
     noteError("reply", error);
@@ -389,13 +401,19 @@ function handleDot(api, event, on) {
 function onMessage(api, event) {
   if (!event) return;
   if (event.type && event.type !== "message") return;
-  if (botPaused) return;
+  if (botPaused) {
+    debugLog("Ignored", "Bot is paused");
+    return;
+  }
   if (event.senderID && botUserID && String(event.senderID) === String(botUserID)) return;
 
   const body = String(event.body || "").trim();
   if (!body) return;
 
-  if (store.list().length && store.getSettings().admin_only && !store.rankOf(event.senderID)) return;
+  if (store.list().length && store.getSettings().admin_only && !store.rankOf(event.senderID)) {
+    debugLog("Ignored", `Non-admin message ignored: ${event.senderID}`);
+    return;
+  }
 
   stats.received++;
   lastMessageAt = new Date().toISOString();
@@ -404,7 +422,6 @@ function onMessage(api, event) {
   const threadID = String(event.threadID);
   const senderID = String(event.senderID || "");
 
-  // Dot commands at Banat commands ay laging papayagang i-toggle ang thread on/off
   if (body === "." || body === "..") { 
     stats.commands++; 
     handleDot(api, event, body === "."); 
@@ -417,12 +434,16 @@ function onMessage(api, event) {
     return; 
   }
 
-  // --- DASHBOARD / THREAD CHECK ---
+  // --- DASHBOARD CHECK ---
   const active = autoreply.isOn() || activeThreads.has(threadID) || isBanatConversationModeActive(threadID);
   const target = classifyBanatTarget({ event, body, botID: botUserID });
-  if (!active && !target.shouldRespond) return;
+  
+  if (!active && !target.shouldRespond) {
+    debugLog("Ignored", `Thread ${threadID} is NOT active in dashboard/conversation mode.`);
+    return;
+  }
 
-  // --- 1. COUNTING / BILANGAN DETECTOR (Sisirain ang bilangan hanggang 1000) ---
+  // --- 1. COUNTING BREAKER ---
   const numMatch = body.match(/^(\d+)$/);
   if (numMatch) {
     const currentNum = parseInt(numMatch[1], 10);
@@ -440,6 +461,7 @@ function onMessage(api, event) {
       threadCountingState.set(threadID, lastState);
 
       if (lastState.consecutive >= 2) {
+        debugLog("CounterBreaker", `Detected counting (${currentNum}) in thread ${threadID}`);
         const breakerReplies = [
           `${currentNum + 1} daw oh. joke, bobo nyo magbilang HAHAHAHA`,
           `${currentNum + 1} — ay mali, tangina sira na naman tuloy`,
@@ -451,21 +473,25 @@ function onMessage(api, event) {
         
         const countDelay = Math.floor(Math.random() * 3000) + 1000;
         setTimeout(() => {
-          sendBanat(api, event, randomBreaker).catch(err => console.error("[BANAT] counter breaker error:", err));
+          sendBanat(api, event, randomBreaker).catch(err => noteError("counter breaker", err));
         }, countDelay);
         return;
       }
     }
   }
 
-  // --- 2. NORMAL BANAT REPLY (Walang message skip, deretso sa banat-human.js na may 1-15s delay) ---
+  // --- 2. NORMAL BANAT REPLY (1-15 Seconds Random Delay) ---
   const reply = autoreply.pickReply(body, threadID, getTriggerReply, getBanatConversationReply);
-  if (!reply) return;
+  if (!reply) {
+    debugLog("PickReply", `No reply pattern matched for message: "${body}"`);
+    return;
+  }
 
   const randomReplyDelay = Math.floor(Math.random() * 14000) + 1000;
+  debugLog("BanatReply", `Queued reply in ${Math.round(randomReplyDelay / 1000)}s for thread ${threadID}`);
 
   setTimeout(() => {
-    sendBanat(api, event, reply).catch(error => console.error("[BANAT] reply error:", error));
+    sendBanat(api, event, reply).catch(error => noteError("banat reply delay", error));
   }, randomReplyDelay);
 }
 
@@ -784,7 +810,7 @@ try {
     probe_failures: probeFailures,
     last_probe_ok: lastProbeOk,
     last_probe_at: lastProbeAt,
-    memory_mb: Math.round(process.memoryUsage().rss / 1048576),
+    memory_mb: Math.round(process.env.MEMORY_LIMIT_MB || process.memoryUsage().rss / 1048576),
     memory_limit_mb: MEMORY_LIMIT_MB,
     admin_count: store.list().length,
     admin_only: Boolean(store.getSettings().admin_only),
