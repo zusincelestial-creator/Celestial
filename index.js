@@ -17,8 +17,7 @@
  *
  * Features:
  * - Dashboard thread restriction (gagana lang kung nakabukas sa dashboard)
- * - Random 1-15s reply delay
- * - Random 1-3 message skips
+ * - Random 1-15s reply delay (no skips)
  * - Counting breaker (sisirain ang bilangan hanggang 1000)
  */
 
@@ -47,9 +46,8 @@ const threadQueues = new Map();
 const threadLastSent = new Map();
 const threadCooldown = new Map();
 
-// --- Counting & Skip Trackers ---
+// --- Counting Tracker ---
 const threadCountingState = new Map();
-const threadSkipCounter = new Map();
 
 let globalActive = 0;
 let botUserID = "";
@@ -420,14 +418,11 @@ function onMessage(api, event) {
   }
 
   // --- DASHBOARD / THREAD CHECK ---
-  // Kung hindi naka-ON ang auto reply sa dashboard para sa thread na ito o sa buong sistema, i-ignore
   const active = autoreply.isOn() || activeThreads.has(threadID) || isBanatConversationModeActive(threadID);
   const target = classifyBanatTarget({ event, body, botID: botUserID });
   if (!active && !target.shouldRespond) return;
 
-  if (autoreply.check({ senderID, threadID, body, isAdmin: Boolean(store.rankOf(senderID)) })) return;
-
-  // --- 1. COUNTING / BILANGAN DETECTOR (Sisirain ang bilang hanggang 1000) ---
+  // --- 1. COUNTING / BILANGAN DETECTOR (Sisirain ang bilangan hanggang 1000) ---
   const numMatch = body.match(/^(\d+)$/);
   if (numMatch) {
     const currentNum = parseInt(numMatch[1], 10);
@@ -463,21 +458,10 @@ function onMessage(api, event) {
     }
   }
 
-  // --- 2. RANDOM 1 TO 3 MESSAGE SKIPS ---
-  let skipsLeft = threadSkipCounter.get(threadID) || 0;
-  if (skipsLeft > 0) {
-    threadSkipCounter.set(threadID, skipsLeft - 1);
-    return; 
-  } else {
-    const nextSkip = Math.floor(Math.random() * 3) + 1; // 1, 2, o 3 skips
-    threadSkipCounter.set(threadID, nextSkip);
-  }
-
-  // --- 3. NORMAL BANAT REPLY NA MAY RANDOM 1-15 SECONDS DELAY ---
+  // --- 2. NORMAL BANAT REPLY (Walang message skip, deretso sa banat-human.js na may 1-15s delay) ---
   const reply = autoreply.pickReply(body, threadID, getTriggerReply, getBanatConversationReply);
   if (!reply) return;
 
-  // Random delay sa pagitan ng 1,000ms hanggang 15,000ms (1 to 15 seconds)
   const randomReplyDelay = Math.floor(Math.random() * 14000) + 1000;
 
   setTimeout(() => {
