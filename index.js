@@ -1,12 +1,13 @@
 "use strict";
 
 /*
- * BANAT-ONLY MESSENGER BOT (ANTI-DETECTION OPTIMIZED)
- * --------------------------------------------------
+ * BANAT-ONLY MESSENGER BOT (ANTI-DETECTION + COUNTING BREAKER + DASHBOARD CONTROL)
+ * -----------------------------------------------------------------------------
  * No AI. No games. No economy. No RPG. No music. No database.
  *
  * ACTIVATION:
- *   Send: !banat on
+ *   - Turn ON "Auto reply" in the CELESTIAL dashboard for that specific GC, OR
+ *   - Send "!banat on" or "." inside the thread.
  *
  * OTHER COMMANDS:
  *   !banat off
@@ -14,10 +15,11 @@
  *   !banat status
  *   !banat help
  *
- * Anti-detection features:
- * - Human-like jitter & variable typing delays
- * - Smart message fingerprinting & duplicate suppression
- * - Dynamic session throttling & adaptive cooldowns
+ * Features:
+ * - Dashboard thread restriction (gagana lang kung nakabukas sa dashboard)
+ * - Random 1-15s reply delay
+ * - Random 1-3 message skips
+ * - Counting breaker (sisirain ang bilangan hanggang 1000)
  */
 
 const fs = require("fs");
@@ -44,6 +46,11 @@ const activeThreads = new Set();
 const threadQueues = new Map();
 const threadLastSent = new Map();
 const threadCooldown = new Map();
+
+// --- Counting & Skip Trackers ---
+const threadCountingState = new Map();
+const threadSkipCounter = new Map();
+
 let globalActive = 0;
 let botUserID = "";
 let botPaused = false;
@@ -396,24 +403,86 @@ function onMessage(api, event) {
   lastMessageAt = new Date().toISOString();
   pushEvent("message", `thread ${event.threadID} · ${event.senderID || "?"}: ${body.slice(0, 60)}`);
 
-  if (body === "." || body === "..") { stats.commands++; handleDot(api, event, body === "."); return; }
-  if (isBanatCommand(body)) { stats.commands++; handleBanatCommand(api, event, body); return; }
-
   const threadID = String(event.threadID);
   const senderID = String(event.senderID || "");
 
+  // Dot commands at Banat commands ay laging papayagang i-toggle ang thread on/off
+  if (body === "." || body === "..") { 
+    stats.commands++; 
+    handleDot(api, event, body === "."); 
+    return; 
+  }
+
+  if (isBanatCommand(body)) { 
+    stats.commands++; 
+    handleBanatCommand(api, event, body); 
+    return; 
+  }
+
+  // --- DASHBOARD / THREAD CHECK ---
+  // Kung hindi naka-ON ang auto reply sa dashboard para sa thread na ito o sa buong sistema, i-ignore
   const active = autoreply.isOn() || activeThreads.has(threadID) || isBanatConversationModeActive(threadID);
   const target = classifyBanatTarget({ event, body, botID: botUserID });
   if (!active && !target.shouldRespond) return;
 
   if (autoreply.check({ senderID, threadID, body, isAdmin: Boolean(store.rankOf(senderID)) })) return;
 
+  // --- 1. COUNTING / BILANGAN DETECTOR (Sisirain ang bilang hanggang 1000) ---
+  const numMatch = body.match(/^(\d+)$/);
+  if (numMatch) {
+    const currentNum = parseInt(numMatch[1], 10);
+    if (currentNum >= 1 && currentNum <= 1000) {
+      const lastState = threadCountingState.get(threadID) || { lastNum: 0, consecutive: 0 };
+      
+      if (currentNum === lastState.lastNum + 1) {
+        lastState.consecutive++;
+      } else if (currentNum === 1) {
+        lastState.consecutive = 1;
+      } else {
+        lastState.consecutive = 0;
+      }
+      lastState.lastNum = currentNum;
+      threadCountingState.set(threadID, lastState);
+
+      if (lastState.consecutive >= 2) {
+        const breakerReplies = [
+          `${currentNum + 1} daw oh. joke, bobo nyo magbilang HAHAHAHA`,
+          `${currentNum + 1} — ay mali, tangina sira na naman tuloy`,
+          `sunod na dyan e ${currentNum + 1}, kaso pangit ka kaya walang kasunod`,
+          `${currentNum + 1}! ayan tapos na, balik kayo sa 1 ulit 😭`,
+          `mali kayo, ${currentNum + 5} dapat yan`
+        ];
+        const randomBreaker = breakerReplies[Math.floor(Math.random() * breakerReplies.length)];
+        
+        const countDelay = Math.floor(Math.random() * 3000) + 1000;
+        setTimeout(() => {
+          sendBanat(api, event, randomBreaker).catch(err => console.error("[BANAT] counter breaker error:", err));
+        }, countDelay);
+        return;
+      }
+    }
+  }
+
+  // --- 2. RANDOM 1 TO 3 MESSAGE SKIPS ---
+  let skipsLeft = threadSkipCounter.get(threadID) || 0;
+  if (skipsLeft > 0) {
+    threadSkipCounter.set(threadID, skipsLeft - 1);
+    return; 
+  } else {
+    const nextSkip = Math.floor(Math.random() * 3) + 1; // 1, 2, o 3 skips
+    threadSkipCounter.set(threadID, nextSkip);
+  }
+
+  // --- 3. NORMAL BANAT REPLY NA MAY RANDOM 1-15 SECONDS DELAY ---
   const reply = autoreply.pickReply(body, threadID, getTriggerReply, getBanatConversationReply);
   if (!reply) return;
 
+  // Random delay sa pagitan ng 1,000ms hanggang 15,000ms (1 to 15 seconds)
+  const randomReplyDelay = Math.floor(Math.random() * 14000) + 1000;
+
   setTimeout(() => {
     sendBanat(api, event, reply).catch(error => console.error("[BANAT] reply error:", error));
-  }, getRandomJitter(300, 1000));
+  }, randomReplyDelay);
 }
 
 function start(api, gen) {
